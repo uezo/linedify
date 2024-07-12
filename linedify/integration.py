@@ -1,7 +1,5 @@
-from datetime import datetime, timezone
 import json
 from logging import getLogger, NullHandler
-import os
 from traceback import format_exc
 from typing import List, Tuple
 import aiohttp
