@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
 import json
 from logging import getLogger, NullHandler
+import os
 from traceback import format_exc
 from typing import List, Tuple
 import aiohttp
@@ -17,6 +19,70 @@ logger = getLogger(__name__)
 logger.addHandler(NullHandler())
 
 
+class ConversationSession:
+    def __init__(self, user_id: str, conversation_id: str = None, updated_at: datetime = None) -> None:
+        self.user_id = user_id
+        self.conversation_id = conversation_id
+        self.updated_at = updated_at or datetime.now(timezone.utc)
+
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "conversation_id": self.conversation_id,
+            "updated_at": self.updated_at.isoformat()
+        }
+
+    @staticmethod
+    def from_dict(data):
+        return ConversationSession(
+            user_id=data["user_id"],
+            conversation_id=data.get("conversation_id"),
+            updated_at=datetime.fromisoformat(data["updated_at"])
+        )
+
+
+class ConversationSessionStore:
+    def __init__(self, persisit_directory: str = "sessions", timeout: float = 3600.0) -> None:
+        self.timeout = timeout
+        self.directory = persisit_directory
+        if not os.path.exists(persisit_directory):
+            os.makedirs(persisit_directory)
+
+    def _get_file_path(self, user_id: str) -> str:
+        return os.path.join(self.directory, f"{user_id}.json")
+
+    def _load_session(self, user_id: str) -> ConversationSession:
+        file_path = self._get_file_path(user_id)
+        if not os.path.exists(file_path):
+            return None
+
+        with open(file_path, "r") as file:
+            data = json.load(file)
+            return ConversationSession.from_dict(data)
+
+    def _save_session(self, session: ConversationSession) -> None:
+        file_path = self._get_file_path(session.user_id)
+        with open(file_path, "w") as file:
+            json.dump(session.to_dict(), file)
+
+    async def get_session(self, user_id: str) -> ConversationSession:
+        if not user_id:
+            raise Exception("user_id is required")
+
+        session = self._load_session(user_id)
+        if session is None or (datetime.now(timezone.utc) - session.updated_at).total_seconds() > self.timeout:
+            session = ConversationSession(user_id)
+
+        return session
+
+    async def set_session(self, session: ConversationSession) -> None:
+        if not session.user_id:
+            raise Exception("user_id is required")
+
+        session.updated_at = datetime.now(timezone.utc)
+        self._save_session(session)
+
+
 class LineDifyIntegrator:
     def __init__(self, *,
         line_channel_access_token: str,
@@ -26,6 +92,7 @@ class LineDifyIntegrator:
         dify_user: str,
         dify_type: DifyType = DifyType.Agent,
         error_response: str = None,
+        conversation_timeout: float = 3600.0,
         verbose: bool = False
     ) -> None:
 
@@ -45,6 +112,8 @@ class LineDifyIntegrator:
             "sticker": self.parse_sticker_message,
             "location": self.parse_location_message
         }
+
+        self.conversation_session_store = ConversationSessionStore(timeout=conversation_timeout)
 
         # Dify
         self.dify_agent = DifyAgent(
@@ -101,7 +170,12 @@ class LineDifyIntegrator:
                 raise Exception(f"Unhandled message type: {event.message.type}")
 
             request_text, image_bytes = await parse_message(event.message)
-            text, data = await self.dify_agent.invoke(event.source.user_id, text=request_text, image=image_bytes)
+
+            conversation_session = await self.conversation_session_store.get_session(event.source.user_id)
+            conversation_id, text, data = await self.dify_agent.invoke(conversation_session.conversation_id, text=request_text, image=image_bytes)
+            conversation_session.conversation_id = conversation_id
+            await self.conversation_session_store.set_session(conversation_session)
+
             response_messages = await self.process_response(text, data)
 
             if self.verbose:

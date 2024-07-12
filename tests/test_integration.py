@@ -1,7 +1,10 @@
 import pytest
+import asyncio
 import os
+from datetime import datetime, timezone
 from linebot.models import TextMessage, ImageMessage, StickerMessage, LocationMessage
 from linedify import LineDify, DifyType
+from linedify.integration import ConversationSession, ConversationSessionStore
 
 
 @pytest.fixture
@@ -70,3 +73,57 @@ async def test_parse_text_message(line_dify):
     parsed_text, parsed_image = await line_dify.parse_location_message(text_message)
     assert parsed_text == f"You received a location info from user in messenger app:\n    - address: Jiyugaoka, Tokyo\n    - latitude: 35.6\n    - longitude: 139.6"
     assert parsed_image is None
+
+
+def test_conversation_session():
+    now = datetime.now(timezone.utc)
+    session = ConversationSession("user_id", "conversation_id", now)
+
+    assert session.user_id == "user_id"
+    assert session.conversation_id == "conversation_id"
+    assert session.updated_at == now
+
+    session_dict = session.to_dict()
+    session_dict["user_id"] == session.user_id
+    session_dict["conversation_id"] == session.conversation_id
+    session_dict["updated_at"] == now.isoformat()
+
+    session2 = ConversationSession.from_dict(session_dict)
+    assert session2.user_id == session.user_id
+    assert session2.conversation_id == session.conversation_id
+    assert session2.updated_at == session.updated_at
+
+
+@pytest.mark.asyncio
+async def test_conversation_session_store():
+    store = ConversationSessionStore("test_sessions", 3)
+    assert store.directory == "test_sessions"
+    assert store.timeout == 3.0
+    assert os.path.exists("test_sessions") is True
+
+    # New session
+    session = await store.get_session("user_id")
+    assert session.user_id == "user_id"
+    assert session.conversation_id is None
+    assert isinstance(session.updated_at, datetime)
+
+    last_updated_at = session.updated_at
+    session.conversation_id = "conversation_id"
+    await store.set_session(session)
+
+    # Successive session
+    session2 = await store.get_session("user_id")
+    assert session2.user_id == "user_id"
+    assert session2.conversation_id == "conversation_id"
+    assert session2.updated_at > last_updated_at
+
+    last_updated_at = session2.updated_at
+    await store.set_session(session2)
+
+    await asyncio.sleep(store.timeout + 1.0)
+
+    # Timeout
+    session3 = await store.get_session("user_id")
+    assert session3.user_id == "user_id"
+    assert session3.conversation_id is None
+    assert session3.updated_at > last_updated_at
