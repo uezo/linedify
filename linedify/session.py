@@ -81,7 +81,7 @@ class ConversationSessionStore:
             db_session.merge(db_session_model)
             db_session.commit()
 
-    async def get_user_conversations(self, user_id: str, count: int = 20) -> list[ConversationSession]:
+    async def get_user_conversations(self, user_id: str, count: int = 20) -> List[ConversationSession]:
         with self.Session() as session:
             db_sessions = session.query(ConversationSessionModel).filter_by(user_id=user_id).order_by(ConversationSessionModel.updated_at.desc()).limit(count)
             user_conversations = [ConversationSession(
