@@ -1,7 +1,5 @@
-from datetime import datetime, timezone
 import json
 from logging import getLogger, NullHandler
-import os
 from traceback import format_exc
 from typing import List, Tuple
 import aiohttp
@@ -13,74 +11,11 @@ from linebot.models import (
     ImageMessage, SendMessage, TextSendMessage
 )
 from .dify import DifyAgent, DifyType
+from .session import ConversationSessionStore
 
 
 logger = getLogger(__name__)
 logger.addHandler(NullHandler())
-
-
-class ConversationSession:
-    def __init__(self, user_id: str, conversation_id: str = None, updated_at: datetime = None) -> None:
-        self.user_id = user_id
-        self.conversation_id = conversation_id
-        self.updated_at = updated_at or datetime.now(timezone.utc)
-
-    def to_dict(self):
-        return {
-            "user_id": self.user_id,
-            "conversation_id": self.conversation_id,
-            "updated_at": self.updated_at.isoformat()
-        }
-
-    @staticmethod
-    def from_dict(data):
-        return ConversationSession(
-            user_id=data["user_id"],
-            conversation_id=data.get("conversation_id"),
-            updated_at=datetime.fromisoformat(data["updated_at"])
-        )
-
-
-class ConversationSessionStore:
-    def __init__(self, persisit_directory: str = "sessions", timeout: float = 3600.0) -> None:
-        self.timeout = timeout
-        self.directory = persisit_directory
-        if not os.path.exists(persisit_directory):
-            os.makedirs(persisit_directory)
-
-    def _get_file_path(self, user_id: str) -> str:
-        return os.path.join(self.directory, f"{user_id}.json")
-
-    def _load_session(self, user_id: str) -> ConversationSession:
-        file_path = self._get_file_path(user_id)
-        if not os.path.exists(file_path):
-            return None
-
-        with open(file_path, "r") as file:
-            data = json.load(file)
-            return ConversationSession.from_dict(data)
-
-    def _save_session(self, session: ConversationSession) -> None:
-        file_path = self._get_file_path(session.user_id)
-        with open(file_path, "w") as file:
-            json.dump(session.to_dict(), file)
-
-    async def get_session(self, user_id: str) -> ConversationSession:
-        if not user_id:
-            raise Exception("user_id is required")
-
-        session = self._load_session(user_id)
-        if session is None or (datetime.now(timezone.utc) - session.updated_at).total_seconds() > self.timeout:
-            session = ConversationSession(user_id)
-
-        return session
-
-    async def set_session(self, session: ConversationSession) -> None:
-        if not session.user_id:
-            raise Exception("user_id is required")
-
-        session.updated_at = datetime.now(timezone.utc)
-        self._save_session(session)
 
 
 class LineDifyIntegrator:
@@ -92,7 +27,8 @@ class LineDifyIntegrator:
         dify_user: str,
         dify_type: DifyType = DifyType.Agent,
         error_response: str = None,
-        conversation_timeout: float = 3600.0,
+        session_db_url: str = "sqlite:///sessions.db",
+        session_timeout: float = 3600.0,
         verbose: bool = False
     ) -> None:
 
@@ -113,7 +49,10 @@ class LineDifyIntegrator:
             "location": self.parse_location_message
         }
 
-        self.conversation_session_store = ConversationSessionStore(timeout=conversation_timeout)
+        self.conversation_session_store = ConversationSessionStore(
+            db_url=session_db_url,
+            timeout=session_timeout
+        )
 
         # Dify
         self.dify_agent = DifyAgent(

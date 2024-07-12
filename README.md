@@ -150,6 +150,25 @@ line_dify.make_error_response = make_error_response
 ```
 
 
+## 💾 Conversation session
+
+Conversation sessions are managed by a database. By default, SQLite is used, but you can specify the file path or database type using `session_db_url`. For the syntax, please refer to SQLAlchemy's documentation.
+
+Additionally, you can specify the session validity period with `session_timeout`. The default is 3600 seconds. If this period elapses since the last conversation, a new conversation thread will be created on Dify when the next conversation starts.
+
+```python
+line_dify = LineDify(
+    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
+    line_channel_secret=YOUR_CHANNEL_SECRET,
+    dify_api_key=DIFY_API_KEY,
+    dify_base_url=DIFY_BASE_URL,
+    dify_user=DIFY_USER,
+    session_db_url="sqlite:///your_sessions.db",    # SQLAlchemy database url
+    session_timeout=1800,                           # Timeout in seconds
+)
+```
+
+
 ## 🐝 Debug
 
 Set `verbose=True` to see the request and response, both from/to LINE and from/to Dify.
