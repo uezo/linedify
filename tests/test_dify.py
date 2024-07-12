@@ -51,25 +51,24 @@ async def test_make_payloads_with_image(dify_agent, image_bytes):
 
 @pytest.mark.asyncio
 async def test_invoke(dify_agent):
-    response_text, response_data = await dify_agent.invoke(user_id="test_user_id", text="This is a test. Respond success.")
+    conversation_id, response_text, response_data = await dify_agent.invoke(conversation_id=None, text="This is a test. Respond success.")
 
     assert "success" in response_text.lower()
     assert response_data == {}
-    assert dify_agent.conversation_ids["test_user_id"] is not None
+    assert conversation_id is not None
 
-    conversation_id = dify_agent.conversation_ids["test_user_id"]
-    response_text, response_data = await dify_agent.invoke(user_id="test_user_id", text="This is a test. Respond success again.")
+    conversation_id2, response_text, response_data = await dify_agent.invoke(conversation_id=conversation_id, text="This is a test. Respond success again.")
 
     assert "success" in response_text.lower()
     assert response_data == {}
-    assert dify_agent.conversation_ids["test_user_id"] == conversation_id
+    assert conversation_id2 == conversation_id
 
 
 @pytest.mark.asyncio
 async def test_invoke_with_image(dify_agent, image_bytes):
-    response_text, response_data = await dify_agent.invoke(user_id="test_user_id", text="what's this?", image=image_bytes)
+    conversation_id, response_text, response_data = await dify_agent.invoke(conversation_id=None, text="what's this? Answer in English.", image=image_bytes)
 
     assert "cat" in response_text.lower()
     assert "girl" in response_text.lower()
     assert response_data == {}
-    assert dify_agent.conversation_ids["test_user_id"] is not None
+    assert conversation_id is not None

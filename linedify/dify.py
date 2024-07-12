@@ -127,15 +127,14 @@ class DifyAgent:
 
         raise Exception("Workflow is not supported for now.")
 
-    async def invoke(self, user_id: str, text: str = None, image: bytes = None) -> Tuple[str, Dict]:
+    async def invoke(self, conversation_id: str, text: str = None, image: bytes = None, start_as_new: bool = False) -> Tuple[str, Dict]:
         headers = {
             "Authorization": f"Bearer {self.api_key}"
         }
 
         payloads = await self.make_payloads(text, image)
 
-        conversation_id = self.conversation_ids.get(user_id)
-        if conversation_id:
+        if conversation_id and not start_as_new:
             payloads["conversation_id"] = conversation_id
 
         async with aiohttp.ClientSession() as session:
@@ -155,5 +154,4 @@ class DifyAgent:
                 response_processor = self.response_processors[self.type]
                 conversation_id, response_text, response_data = await response_processor(response)
 
-                self.conversation_ids[user_id] = conversation_id
-                return response_text, response_data
+                return conversation_id, response_text, response_data
