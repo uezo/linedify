@@ -31,9 +31,9 @@ class DifyAgent:
         }
         self.conversation_ids = {}
 
-    async def make_payloads(self, text: str, image_bytes: bytes = None) -> Dict:
+    async def make_payloads(self, text: str, image_bytes: bytes = None, inputs: dict = None) -> Dict:
         payloads = {
-            "inputs": {},
+            "inputs": inputs or {},
             "query": text,
             "response_mode": "streaming" if self.type == DifyType.Agent else "blocking",
             "user": self.user,
@@ -127,12 +127,12 @@ class DifyAgent:
 
         raise Exception("Workflow is not supported for now.")
 
-    async def invoke(self, conversation_id: str, text: str = None, image: bytes = None, start_as_new: bool = False) -> Tuple[str, Dict]:
+    async def invoke(self, conversation_id: str, text: str = None, image: bytes = None, inputs: dict = None, start_as_new: bool = False) -> Tuple[str, Dict]:
         headers = {
             "Authorization": f"Bearer {self.api_key}"
         }
 
-        payloads = await self.make_payloads(text, image)
+        payloads = await self.make_payloads(text, image, inputs)
 
         if conversation_id and not start_as_new:
             payloads["conversation_id"] = conversation_id

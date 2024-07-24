@@ -63,6 +63,7 @@ class LineDifyIntegrator:
             verbose=self.verbose
         )
 
+        self.make_inputs = None
         self.error_response = error_response
 
     async def process_request(self, request_body: str, signature: str):
@@ -111,7 +112,12 @@ class LineDifyIntegrator:
             request_text, image_bytes = await parse_message(event.message)
 
             conversation_session = await self.conversation_session_store.get_session(event.source.user_id)
-            conversation_id, text, data = await self.dify_agent.invoke(conversation_session.conversation_id, text=request_text, image=image_bytes)
+            if self.make_inputs:
+                inputs = self.make_inputs(conversation_session)
+            else:
+                inputs = {}
+
+            conversation_id, text, data = await self.dify_agent.invoke(conversation_session.conversation_id, text=request_text, image=image_bytes, inputs=inputs)
             conversation_session.conversation_id = conversation_id
             await self.conversation_session_store.set_session(conversation_session)
 
