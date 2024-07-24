@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List
-from sqlalchemy import create_engine, Column, String, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
@@ -36,6 +36,7 @@ class ConversationSessionModel(Base):
     user_id = Column(String, nullable=False)
     conversation_id = Column(String)
     updated_at = Column(DateTime(timezone=True), nullable=False)
+    is_expired = Column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("user_id", "conversation_id", name="uix_user_conversation"),)
 
@@ -56,7 +57,13 @@ class ConversationSessionStore:
 
             now = datetime.now(timezone.utc)
 
-            if db_session is None or (now - db_session.updated_at.replace(tzinfo=timezone.utc)).total_seconds() > self.timeout:
+            if db_session is None:
+                return ConversationSession(user_id)
+
+            if db_session.is_expired:
+                return ConversationSession(user_id)
+
+            if self.timeout > 0 and (now - db_session.updated_at.replace(tzinfo=timezone.utc)).total_seconds() > self.timeout:
                 return ConversationSession(user_id)
 
             return ConversationSession(
@@ -80,6 +87,17 @@ class ConversationSessionStore:
             )
             db_session.merge(db_session_model)
             db_session.commit()
+
+    async def expire_session(self, user_id: str) -> None:
+        if not user_id:
+            raise Exception("user_id is required")
+
+        with self.Session() as session:
+            latest_session = session.query(ConversationSessionModel).filter_by(user_id=user_id).order_by(ConversationSessionModel.updated_at.desc()).first()
+
+            if latest_session:
+                latest_session.is_expired = True
+                session.commit()
 
     async def get_user_conversations(self, user_id: str, count: int = 20) -> List[ConversationSession]:
         with self.Session() as session:

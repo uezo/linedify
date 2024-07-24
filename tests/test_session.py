@@ -68,6 +68,12 @@ async def test_conversation_session_store():
     assert session4.user_id == "user_id"
     assert session4.conversation_id == conversation_id3
 
+    # Expire
+    await store.expire_session("user_id")
+    session5 = await store.get_session("user_id")
+    assert session5.user_id == "user_id"
+    assert session5.conversation_id is None
+
     # List sessions
     sessions = await store.get_user_conversations("user_id")
 
