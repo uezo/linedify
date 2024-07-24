@@ -118,6 +118,30 @@ async def process_response(text: str, data: dict) -> List[SendMessage]:
 line_dify.process_response = process_response
 ```
 
+## 🎨 Customize Inputs
+
+You can customize `inputs` as arguments for Dify conversation threads.
+
+```python
+def make_inputs(session: ConversationSession):
+    # You can use session to customize inputs dynamically here
+
+    if not session.conversation_id:
+        return {"foo": "bar"}
+    else:
+        return {}
+
+line_dify = LineDify(
+    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
+    line_channel_secret=YOUR_CHANNEL_SECRET,
+    dify_api_key=DIFY_API_KEY,
+    dify_base_url=DIFY_BASE_URL,
+    dify_user=DIFY_USER
+)
+
+line_dify.make_inputs = make_inputs
+```
+
 
 ## 😢 Customize Error Message
 

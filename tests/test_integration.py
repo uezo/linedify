@@ -70,3 +70,24 @@ async def test_parse_text_message(line_dify):
     parsed_text, parsed_image = await line_dify.parse_location_message(text_message)
     assert parsed_text == f"You received a location info from user in messenger app:\n    - address: Jiyugaoka, Tokyo\n    - latitude: 35.6\n    - longitude: 139.6"
     assert parsed_image is None
+
+
+@pytest.mark.asyncio
+async def test_make_inputs(line_dify):
+    # TODO: Make test for handle_message_event
+
+    def make_inputs(session):
+        if not session.conversation_id:
+            return {"foo": "bar"}
+        else:
+            return {}
+
+    line_dify.make_inputs = make_inputs
+
+    session = await line_dify.conversation_session_store.get_session("user_id")
+    inputs = line_dify.make_inputs(session)
+    assert inputs.get("foo") == "bar"
+
+    session.conversation_id = "1234567890"
+    inputs = line_dify.make_inputs(session)
+    assert inputs.get("foo") is None
