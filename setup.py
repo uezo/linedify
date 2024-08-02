@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="linedify",
-    version="0.2.5",
+    version="0.2.3",
     url="https://github.com/uezo/linedify",
     author="uezo",
     author_email="uezo@uezo.net",
