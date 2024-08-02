@@ -63,7 +63,10 @@ class LineDifyIntegrator:
             verbose=self.verbose
         )
 
+        # Custom logics
+        self.validate_event = None
         self.make_inputs = None
+
         self.error_response = error_response
 
     async def process_request(self, request_body: str, signature: str):
@@ -104,6 +107,12 @@ class LineDifyIntegrator:
         try:
             if self.verbose:
                 logger.info(f"Request from LINE: {json.dumps(event.as_json_dict(), ensure_ascii=False)}")
+
+            if self.validate_event:
+                validation_message = await self.validate_event(event)
+                if validation_message:
+                    await self.line_api.reply_message(event.reply_token, [validation_message])
+                    return
 
             parse_message = self.message_parsers.get(event.message.type)
             if not parse_message:

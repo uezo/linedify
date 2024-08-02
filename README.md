@@ -118,18 +118,45 @@ async def process_response(text: str, data: dict) -> List[SendMessage]:
 line_dify.process_response = process_response
 ```
 
-## 🎨 Customize Inputs
+## 🎨 Custom Logic
+
+### Event Validation
+
+You can validate and event by implementing `validate_event`.
+
+```python
+banned_users = ["U123456", "U234567"]
+
+async def validate_event(event):
+    line_user_id = event.source.user_id
+    if line_user_id in banned_users:
+        return TextSendMessage("Forbidden")
+
+line_dify = LineDify(
+    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
+    line_channel_secret=YOUR_CHANNEL_SECRET,
+    dify_api_key=DIFY_API_KEY,
+    dify_base_url=DIFY_BASE_URL,
+    dify_user=DIFY_USER
+)
+
+line_dify.validate_event = validate_event
+```
+
+
+### Inputs
 
 You can customize `inputs` as arguments for Dify conversation threads.
 
 ```python
 def make_inputs(session: ConversationSession):
     # You can use session to customize inputs dynamically here
+    inputs = {"line_user_id": session.user_id}
 
     if not session.conversation_id:
-        return {"foo": "bar"}
-    else:
-        return {}
+        inputs["foo"] = "bar"
+    
+    return inputs
 
 line_dify = LineDify(
     line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
@@ -143,7 +170,7 @@ line_dify.make_inputs = make_inputs
 ```
 
 
-## 😢 Customize Error Message
+### Error Message
 
 Set `error_response` to respond static error message.
 
@@ -174,7 +201,7 @@ line_dify.make_error_response = make_error_response
 ```
 
 
-## 💾 Conversation session
+## 💾 Conversation Session
 
 Conversation sessions are managed by a database. By default, SQLite is used, but you can specify the file path or database type using `session_db_url`. For the syntax, please refer to SQLAlchemy's documentation.
 
