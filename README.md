@@ -95,13 +95,15 @@ line_dify = LineDify(
 
 ## 💎 Use UI Components
 
-Implement `line_dify.process_response` to customize the response message.
+Implement function to edit reply message below the decorator `@line_dify.to_reply_message`.
 
 ```python
 from typing import List
 from linebot.models import SendMessage, TextSendMessage, QuickReply, QuickReplyButton, MessageAction
+from linedify.session import ConversationSession
 
-async def process_response(text: str, data: dict) -> List[SendMessage]:
+@line_dify.to_reply_message
+async def to_reply_message(text: str, data: dict, session: ConversationSession) -> List[SendMessage]:
     response_message = TextSendMessage(text=text)
 
     # Show QuickReply buttons when tool "reservation" was executed on Dify
@@ -113,91 +115,88 @@ async def process_response(text: str, data: dict) -> List[SendMessage]:
             ])
 
     return [response_message]
-
-# Overwrite process_response
-line_dify.process_response = process_response
 ```
 
 ## 🎨 Custom Logic
 
 ### Event Validation
 
-You can validate and event by implementing `validate_event`.
+Use `@line_dify.validate_event` to validate event before handling.
 
 ```python
 banned_users = ["U123456", "U234567"]
 
+@line_dify.validate_event
 async def validate_event(event):
     line_user_id = event.source.user_id
     if line_user_id in banned_users:
-        return TextSendMessage("Forbidden")
+        # Return the list of SendMessage to reply immediately without processing the event
+        return [TextSendMessage("Forbidden")]
+```
 
-line_dify = LineDify(
-    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
-    line_channel_secret=YOUR_CHANNEL_SECRET,
-    dify_api_key=DIFY_API_KEY,
-    dify_base_url=DIFY_BASE_URL,
-    dify_user=DIFY_USER
-)
 
-line_dify.validate_event = validate_event
+### Handle events
+
+Use `@line_dify.event(event_type)` to customize event handlers.
+
+```python
+# Add handler for Postback event
+@line_dify.event("postback")
+async def handle_message_event(event: PostbackEvent):
+    # Do something here
+    # Return reply messages
+    return [TextSendMessage(f"Response for postback event: {event.postback.data}")]
+
+# Add handler for unspecified event
+@line_dify.event()
+async def handle_event(event):
+    # Do something here
+    # Return reply messages
+    return [TextSendMessage(f"Response for event type: {event.type}")]
+```
+
+
+### Parse messages
+
+Use `@line_dify.parse_message(message_type)` to customize message parsers.
+
+```python
+@line_dify.parse_message("location")
+async def parse_location_message(message):
+    text, _ = await line_dify.parse_location_message(message)
+    map_image = get_map_image(message.address)
+    return (text, map_image)
 ```
 
 
 ### Inputs
 
-You can customize `inputs` as arguments for Dify conversation threads.
+Use `@line_dify.make_inputs` to customize `inputs` as arguments for Dify conversation threads.
 
 ```python
-def make_inputs(session: ConversationSession):
+@line_dify.make_inputs
+async def make_inputs(session: ConversationSession):
     # You can use session to customize inputs dynamically here
-    inputs = {"line_user_id": session.user_id}
-
-    if not session.conversation_id:
-        inputs["foo"] = "bar"
+    inputs = {
+        "line_user_id": session.user_id,
+        "favorite_food": "apple"
+    }
     
     return inputs
-
-line_dify = LineDify(
-    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
-    line_channel_secret=YOUR_CHANNEL_SECRET,
-    dify_api_key=DIFY_API_KEY,
-    dify_base_url=DIFY_BASE_URL,
-    dify_user=DIFY_USER
-)
-
-line_dify.make_inputs = make_inputs
 ```
 
 
 ### Error Message
 
-Set `error_response` to respond static error message.
+Use `@line_dify.to_error_message` to customize reply message when error occurs.
 
 ```python
-line_dify = LineDify(
-    line_channel_access_token=YOUR_CHANNEL_ACCESS_TOKEN,
-    line_channel_secret=YOUR_CHANNEL_SECRET,
-    dify_api_key=DIFY_API_KEY,
-    dify_base_url=DIFY_BASE_URL,
-    dify_user=DIFY_USER,
-    error_response="😵 Something wrong..."
-)
-```
-
-Or, implement `line_dify.make_error_response` to make the error message rich and dynamic.
-
-```python
-import random
-from linebot.models import MessageEvent
-
-async def make_error_response(seevent: MessageEvent, ex: Exception) -> List[SendMessage]:
+@line_dify.to_error_message
+async def to_error_message(event: Event, ex: Exception, session: ConversationSession = None):
     # Custom logic here
     text = random.choice(["Error 🥲", "😵 Something wrong...", "🙃"])
+    # Return reply messages
     return [TextSendMessage(text=text)]
-
-# Overwrite process_response
-line_dify.make_error_response = make_error_response
 ```
 
 

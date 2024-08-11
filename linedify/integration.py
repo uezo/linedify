@@ -1,7 +1,7 @@
 import json
 from logging import getLogger, NullHandler
 from traceback import format_exc
-from typing import List, Tuple
+from typing import Dict, List, Tuple, Union
 import aiohttp
 from linebot import AsyncLineBotApi, WebhookParser
 from linebot.aiohttp_async_http_client import AiohttpAsyncHttpClient
@@ -11,7 +11,7 @@ from linebot.models import (
     ImageMessage, SendMessage, TextSendMessage
 )
 from .dify import DifyAgent, DifyType
-from .session import ConversationSessionStore
+from .session import ConversationSession, ConversationSessionStore
 
 
 logger = getLogger(__name__)
@@ -26,7 +26,6 @@ class LineDifyIntegrator:
         dify_base_url: str,
         dify_user: str,
         dify_type: DifyType = DifyType.Agent,
-        error_response: str = None,
         session_db_url: str = "sqlite:///sessions.db",
         session_timeout: float = 3600.0,
         verbose: bool = False
@@ -42,7 +41,13 @@ class LineDifyIntegrator:
             async_http_client=client
         )
         self.webhook_parser = WebhookParser(channel_secret=line_channel_secret)
-        self.message_parsers = {
+
+        self._validate_event = self.validate_event_default
+        self._event_handlers = {
+            "message": self.handle_message_event
+        }
+        self._default_event_handler = self.event_handler_default
+        self._message_parsers = {
             "text": self.parse_text_message,
             "image": self.parse_image_message,
             "sticker": self.parse_sticker_message,
@@ -63,26 +68,117 @@ class LineDifyIntegrator:
             verbose=self.verbose
         )
 
-        # Custom logics
-        self.validate_event = None
-        self.make_inputs = None
+        self._make_inputs = self.make_inputs_default
+        self._to_reply_message = self.to_reply_message_default
+        self._to_error_message = self.to_error_message_default
 
-        self.error_response = error_response
+    # Decorators
+    def event(self, event_type=None):
+        def decorator(func):
+            if event_type is None:
+                self._default_event_handler = func
+            else:
+                self._event_handlers[event_type] = func
+            return func
+        return decorator
 
+    def parse_message(self, message_type):
+        def decorator(func):
+            self._message_parsers[message_type] = func
+            return func
+        return decorator
+
+    def validate_event(self, func):
+        self._validate_event = func
+        return func
+
+    def make_inputs(self, func):
+        self._make_inputs = func
+        return func
+
+    def to_reply_message(self, func):
+        self._to_reply_message = func
+        return func
+
+    def to_error_message(self, func):
+        self._to_error_message = func
+        return func
+
+    # Processors
     async def process_request(self, request_body: str, signature: str):
         events = self.webhook_parser.parse(request_body, signature)
         for event in events:
-            await self.process_event(event)
+            reply_messages = await self.process_event(event)
+
+            try:
+                if reply_messages and hasattr(event, "reply_token"):
+                    await self.line_api.reply_message(event.reply_token, reply_messages)
+
+            except Exception as eex:
+                logger.error(f"Error at replying error message for event: {eex}\n{format_exc()}")
 
     async def process_event(self, event: Event):
         try:
-            if event.type == "message":
-                await self.handle_message_event(event)
+            if validation_messages := await self._validate_event(event):
+                return validation_messages
+            
             else:
-                await self.handle_event(event)
+                event_handler = self._event_handlers.get(event.type)
+                if event_handler:
+                    return await event_handler(event)
+                else:
+                    return await self._default_event_handler(event)
+
         except Exception as ex:
             logger.error(f"Error at process_event: {ex}\n{format_exc()}")
+            return await self._to_error_message(event, ex)
 
+    # Event handlers
+    async def handle_message_event(self, event: MessageEvent):
+        conversation_session = None
+        try:
+            if self.verbose:
+                logger.info(f"Request from LINE: {json.dumps(event.as_json_dict(), ensure_ascii=False)}")
+
+            parse_message = self._message_parsers.get(event.message.type)
+            if not parse_message:
+                raise Exception(f"Unhandled message type: {event.message.type}")
+
+            request_text, image_bytes = await parse_message(event.message)
+            conversation_session = await self.conversation_session_store.get_session(event.source.user_id)
+            inputs = await self._make_inputs(conversation_session)
+
+            conversation_id, text, data = await self.dify_agent.invoke(
+                conversation_session.conversation_id,
+                text=request_text,
+                image=image_bytes,
+                inputs=inputs
+            )
+
+            conversation_session.conversation_id = conversation_id
+            await self.conversation_session_store.set_session(conversation_session)
+
+            response_messages = await self._to_reply_message(text, data, conversation_session)
+
+            if self.verbose:
+                logger.info(f"Response to LINE: {', '.join([json.dumps(m.as_json_dict(), ensure_ascii=False) for m in response_messages])}")
+
+            return response_messages
+
+        except Exception as ex:
+            logger.error(f"Error at handle_message_event: {ex}\n{format_exc()}")
+
+            try:
+                error_message = await self._to_error_message(event, ex, conversation_session)
+                return error_message
+
+            except Exception as eex:
+                logger.error(f"Error at replying error message for message event: {eex}\n{format_exc()}")
+
+    async def event_handler_default(self, event: Event):
+        logger.warning(f"Unhandled event type: {event.type}")
+
+    # Message parsers
     async def parse_text_message(self, message: TextMessage) -> Tuple[str, bytes]:
         return message.text, None
 
@@ -100,58 +196,19 @@ class LineDifyIntegrator:
     async def parse_location_message(self, message: LocationMessage) -> Tuple[str, bytes]:
         return f"You received a location info from user in messenger app:\n    - address: {message['address']}\n    - latitude: {message['latitude']}\n    - longitude: {message['longitude']}", None
 
-    async def make_error_response(self, event: MessageEvent, ex: Exception) -> List[SendMessage]:
-        return [TextSendMessage(text=self.error_response or "Error 🥲")]
+    # Defaults
+    async def validate_event_default(self, Event) -> Union[None, List[SendMessage]]:
+        return None
 
-    async def handle_message_event(self, event: MessageEvent):
-        try:
-            if self.verbose:
-                logger.info(f"Request from LINE: {json.dumps(event.as_json_dict(), ensure_ascii=False)}")
+    async def make_inputs_default(self, session: ConversationSession) -> Dict:
+        return {}
 
-            if self.validate_event:
-                validation_message = await self.validate_event(event)
-                if validation_message:
-                    await self.line_api.reply_message(event.reply_token, [validation_message])
-                    return
-
-            parse_message = self.message_parsers.get(event.message.type)
-            if not parse_message:
-                raise Exception(f"Unhandled message type: {event.message.type}")
-
-            request_text, image_bytes = await parse_message(event.message)
-
-            conversation_session = await self.conversation_session_store.get_session(event.source.user_id)
-            if self.make_inputs:
-                inputs = self.make_inputs(conversation_session)
-            else:
-                inputs = {}
-
-            conversation_id, text, data = await self.dify_agent.invoke(conversation_session.conversation_id, text=request_text, image=image_bytes, inputs=inputs)
-            conversation_session.conversation_id = conversation_id
-            await self.conversation_session_store.set_session(conversation_session)
-
-            response_messages = await self.process_response(text, data)
-
-            if self.verbose:
-                logger.info(f"Response to LINE: {', '.join([json.dumps(m.as_json_dict(), ensure_ascii=False) for m in response_messages])}")
-
-            await self.line_api.reply_message(event.reply_token, response_messages)
-
-        except Exception as ex:
-            logger.error(f"Error at handle_message_event: {ex}\n{format_exc()}")
-
-            try:
-                error_response = await self.make_error_response(event, ex)
-                await self.line_api.reply_message(event.reply_token, error_response)
-
-            except Exception as eex:
-                logger.error(f"Error at replying error message: {eex}\n{format_exc()}")
-
-    async def handle_event(self, event: Event):
-        logger.warning(f"Unhandled event type: {event.type}")
-
-    async def process_response(self, text: str, data: dict) -> List[SendMessage]:
+    async def to_reply_message_default(self, text: str, data: dict, session: ConversationSession) -> List[SendMessage]:
         return [TextSendMessage(text=text)]
 
+    async def to_error_message_default(self, event: Event, ex: Exception, session: ConversationSession = None) -> List[SendMessage]:
+        return [TextSendMessage(text="Error 🥲")]
+
+    # Application lifecycle
     async def shutdown(self):
         await self.line_api_session.close()
