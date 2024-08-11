@@ -85,7 +85,7 @@ class DifyAgent:
             chunk = json.loads(decoded_r[5:])
 
             if self.verbose:
-                logger.info(f"Chunk from Dify: {json.dumps(chunk, ensure_ascii=False)}")
+                logger.debug(f"Chunk from Dify: {json.dumps(chunk, ensure_ascii=False)}")
 
             event_type = chunk["event"]
 
