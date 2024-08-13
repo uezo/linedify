@@ -8,6 +8,7 @@ from linebot.v3.messaging import (
     Configuration,
     AsyncApiClient,
     AsyncMessagingApi,
+    AsyncMessagingApiBlob,
     Message,
     TextMessage,
     ReplyMessageRequest
@@ -50,6 +51,7 @@ class LineDifyIntegrator:
         )
         self.line_api_client = AsyncApiClient(line_api_configuration)
         self.line_api = AsyncMessagingApi(self.line_api_client)
+        self.line_api_blob = AsyncMessagingApiBlob(self.line_api_client)
         self.webhook_parser = WebhookParser(line_channel_secret)
 
         self._validate_event = self.validate_event_default
@@ -198,18 +200,14 @@ class LineDifyIntegrator:
         return message.text, None
 
     async def parse_image_message(self, message: ImageMessageContent) -> Tuple[str, bytes]:
-        image_stream = await self.line_api.get_message_content(message.id)
-        image_bytes = bytearray()
-        async for chunk in image_stream.iter_content():
-            image_bytes.extend(chunk)
-        return "", image_bytes
+        return "", await self.line_api_blob.get_message_content(message.id)
 
     async def parse_sticker_message(self, message: StickerMessageContent) -> Tuple[str, bytes]:
-        sticker_keywords = ", ".join([k for k in message["keywords"]])
+        sticker_keywords = ", ".join([k for k in message.keywords])
         return f"You received a sticker from user in messenger app: {sticker_keywords}", None
 
     async def parse_location_message(self, message: LocationMessageContent) -> Tuple[str, bytes]:
-        return f"You received a location info from user in messenger app:\n    - address: {message['address']}\n    - latitude: {message['latitude']}\n    - longitude: {message['longitude']}", None
+        return f"You received a location info from user in messenger app:\n    - address: {message.address}\n    - latitude: {message.latitude}\n    - longitude: {message.longitude}", None
 
     # Defaults
     async def validate_event_default(self, Event) -> Union[None, List[Message]]:
