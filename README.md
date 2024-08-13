@@ -99,19 +99,19 @@ Implement function to edit reply message below the decorator `@line_dify.to_repl
 
 ```python
 from typing import List
-from linebot.models import SendMessage, TextSendMessage, QuickReply, QuickReplyButton, MessageAction
+from linebot.v3.messaging import Message, TextMessage, QuickReply, QuickReplyItem, MessageAction
 from linedify.session import ConversationSession
 
 @line_dify.to_reply_message
-async def to_reply_message(text: str, data: dict, session: ConversationSession) -> List[SendMessage]:
-    response_message = TextSendMessage(text=text)
+async def to_reply_message(text: str, data: dict, session: ConversationSession) -> List[Message]:
+    response_message = TextMessage(text=text)
 
     # Show QuickReply buttons when tool "reservation" was executed on Dify
     if tool := data.get("tool"):
         if tool == "reservation":
             response_message.quick_reply = QuickReply([
-                QuickReplyButton(action=MessageAction(label="Checkout", text="Checkout")),
-                QuickReplyButton(action=MessageAction(label="Cancel", text="Cancel"))
+                QuickReplyItem(action=MessageAction(label="Checkout", text="Checkout")),
+                QuickReplyItem(action=MessageAction(label="Cancel", text="Cancel"))
             ])
 
     return [response_message]
@@ -130,8 +130,8 @@ banned_users = ["U123456", "U234567"]
 async def validate_event(event):
     line_user_id = event.source.user_id
     if line_user_id in banned_users:
-        # Return the list of SendMessage to reply immediately without processing the event
-        return [TextSendMessage("Forbidden")]
+        # Return the list of TextMessage to reply immediately without processing the event
+        return [TextMessage("Forbidden")]
 ```
 
 
@@ -145,14 +145,14 @@ Use `@line_dify.event(event_type)` to customize event handlers.
 async def handle_message_event(event: PostbackEvent):
     # Do something here
     # Return reply messages
-    return [TextSendMessage(f"Response for postback event: {event.postback.data}")]
+    return [TextMessage(f"Response for postback event: {event.postback.data}")]
 
 # Add handler for unspecified event
 @line_dify.event()
 async def handle_event(event):
     # Do something here
     # Return reply messages
-    return [TextSendMessage(f"Response for event type: {event.type}")]
+    return [TextMessage(f"Response for event type: {event.type}")]
 ```
 
 
@@ -196,7 +196,7 @@ async def to_error_message(event: Event, ex: Exception, session: ConversationSes
     # Custom logic here
     text = random.choice(["Error 🥲", "😵 Something wrong...", "🙃"])
     # Return reply messages
-    return [TextSendMessage(text=text)]
+    return [TextMessage(text=text)]
 ```
 
 
