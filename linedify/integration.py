@@ -2,14 +2,25 @@ import json
 from logging import getLogger, NullHandler
 from traceback import format_exc
 from typing import Dict, List, Tuple, Union
-import aiohttp
-from linebot import AsyncLineBotApi, WebhookParser
-from linebot.aiohttp_async_http_client import AiohttpAsyncHttpClient
-from linebot.models import (
-    Event, MessageEvent,
-    TextMessage, StickerMessage, LocationMessage,
-    ImageMessage, SendMessage, TextSendMessage
+
+from linebot.v3 import WebhookParser
+from linebot.v3.messaging import (
+    Configuration,
+    AsyncApiClient,
+    AsyncMessagingApi,
+    Message,
+    TextMessage,
+    ReplyMessageRequest
 )
+from linebot.v3.webhooks import (
+    Event,
+    MessageEvent,
+    TextMessageContent,
+    StickerMessageContent,
+    LocationMessageContent,
+    ImageMessageContent
+)
+
 from .dify import DifyAgent, DifyType
 from .session import ConversationSession, ConversationSessionStore
 
@@ -34,13 +45,12 @@ class LineDifyIntegrator:
         self.verbose = verbose
 
         # LINE
-        self.line_api_session = aiohttp.ClientSession()
-        client = AiohttpAsyncHttpClient(self.line_api_session)
-        self.line_api = AsyncLineBotApi(
-            channel_access_token=line_channel_access_token,
-            async_http_client=client
+        line_api_configuration = Configuration(
+            access_token=line_channel_access_token
         )
-        self.webhook_parser = WebhookParser(channel_secret=line_channel_secret)
+        self.line_api_client = AsyncApiClient(line_api_configuration)
+        self.line_api = AsyncMessagingApi(self.line_api_client)
+        self.webhook_parser = WebhookParser(line_channel_secret)
 
         self._validate_event = self.validate_event_default
         self._event_handlers = {
@@ -112,7 +122,12 @@ class LineDifyIntegrator:
 
             try:
                 if reply_messages and hasattr(event, "reply_token"):
-                    await self.line_api.reply_message(event.reply_token, reply_messages)
+                    await self.line_api.reply_message(
+                        ReplyMessageRequest(
+                            replyToken=event.reply_token,
+                            messages=reply_messages
+                        )
+                    )
 
             except Exception as eex:
                 logger.error(f"Error at replying error message for event: {eex}\n{format_exc()}")
@@ -179,36 +194,36 @@ class LineDifyIntegrator:
         logger.warning(f"Unhandled event type: {event.type}")
 
     # Message parsers
-    async def parse_text_message(self, message: TextMessage) -> Tuple[str, bytes]:
+    async def parse_text_message(self, message: TextMessageContent) -> Tuple[str, bytes]:
         return message.text, None
 
-    async def parse_image_message(self, message: ImageMessage) -> Tuple[str, bytes]:
+    async def parse_image_message(self, message: ImageMessageContent) -> Tuple[str, bytes]:
         image_stream = await self.line_api.get_message_content(message.id)
         image_bytes = bytearray()
         async for chunk in image_stream.iter_content():
             image_bytes.extend(chunk)
         return "", image_bytes
 
-    async def parse_sticker_message(self, message: StickerMessage) -> Tuple[str, bytes]:
+    async def parse_sticker_message(self, message: StickerMessageContent) -> Tuple[str, bytes]:
         sticker_keywords = ", ".join([k for k in message["keywords"]])
         return f"You received a sticker from user in messenger app: {sticker_keywords}", None
 
-    async def parse_location_message(self, message: LocationMessage) -> Tuple[str, bytes]:
+    async def parse_location_message(self, message: LocationMessageContent) -> Tuple[str, bytes]:
         return f"You received a location info from user in messenger app:\n    - address: {message['address']}\n    - latitude: {message['latitude']}\n    - longitude: {message['longitude']}", None
 
     # Defaults
-    async def validate_event_default(self, Event) -> Union[None, List[SendMessage]]:
+    async def validate_event_default(self, Event) -> Union[None, List[Message]]:
         return None
 
     async def make_inputs_default(self, session: ConversationSession) -> Dict:
         return {}
 
-    async def to_reply_message_default(self, text: str, data: dict, session: ConversationSession) -> List[SendMessage]:
-        return [TextSendMessage(text=text)]
+    async def to_reply_message_default(self, text: str, data: dict, session: ConversationSession) -> List[Message]:
+        return [TextMessage(text=text)]
 
-    async def to_error_message_default(self, event: Event, ex: Exception, session: ConversationSession = None) -> List[SendMessage]:
-        return [TextSendMessage(text="Error 🥲")]
+    async def to_error_message_default(self, event: Event, ex: Exception, session: ConversationSession = None) -> List[Message]:
+        return [TextMessage(text="Error 🥲")]
 
     # Application lifecycle
     async def shutdown(self):
-        await self.line_api_session.close()
+        await self.line_api_client.close()
