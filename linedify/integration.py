@@ -1,7 +1,10 @@
 import json
 from logging import getLogger, NullHandler
 from traceback import format_exc
-from typing import Dict, List, Tuple, Union
+import os
+from typing import Dict, List, Tuple, Union, Optional
+
+from .utils import normalize_line_breaks
 
 from linebot.v3 import WebhookParser
 from linebot.v3.messaging import (
@@ -40,8 +43,15 @@ class LineDifyIntegrator:
         dify_type: DifyType = DifyType.Agent,
         session_db_url: str = "sqlite:///sessions.db",
         session_timeout: float = 3600.0,
-        verbose: bool = False
+        verbose: Optional[bool] = None
     ) -> None:
+
+        if verbose is None:
+            env_verbose = os.getenv("LINEDIFY_VERBOSE")
+            if env_verbose is not None:
+                verbose = env_verbose.lower() in ("1", "true", "yes", "on")
+            else:
+                verbose = False
 
         self.verbose = verbose
 
@@ -173,12 +183,13 @@ class LineDifyIntegrator:
 
             request_text, image_bytes = await parse_message(event.message)
             formated_request_text = await self._format_request_text(request_text, image_bytes)
+            normalized_request_text = normalize_line_breaks(formated_request_text)
             conversation_session = await self.conversation_session_store.get_session(event.source.user_id)
             inputs = await self._make_inputs(conversation_session)
 
             conversation_id, text, data = await self.dify_agent.invoke(
                 conversation_id=conversation_session.conversation_id,
-                text=formated_request_text,
+                text=normalized_request_text,
                 image=image_bytes,
                 inputs=inputs,
                 user=conversation_session.user_id
@@ -187,12 +198,13 @@ class LineDifyIntegrator:
             conversation_session.conversation_id = conversation_id
             await self.conversation_session_store.set_session(conversation_session)
 
-            response_messages = await self._to_reply_message(text, data, conversation_session)
+            normalized_response_text = normalize_line_breaks(text)
+            response_messages = await self._to_reply_message(normalized_response_text, data, conversation_session)
 
             if self.verbose:
                 logger.info(f"Response to LINE: {', '.join([json.dumps(m.to_dict(), ensure_ascii=False) for m in response_messages])}")
 
-            await self._on_message_handling_end(conversation_session, request_text, text, data)
+            await self._on_message_handling_end(conversation_session, request_text, normalized_response_text, data)
 
             return response_messages
 
@@ -228,13 +240,14 @@ class LineDifyIntegrator:
         return None
 
     async def format_request_text_default(self, request_text: str, image_bytes: bytes) -> str:
-        return request_text
+        return normalize_line_breaks(request_text)
 
     async def make_inputs_default(self, session: ConversationSession) -> Dict:
         return {}
 
     async def to_reply_message_default(self, text: str, data: dict, session: ConversationSession) -> List[Message]:
-        return [TextMessage(text=text)]
+        normalized_text = normalize_line_breaks(text)
+        return [TextMessage(text=normalized_text or "")]
 
     async def to_error_message_default(self, event: Event, ex: Exception, session: ConversationSession = None) -> List[Message]:
         return [TextMessage(text="Error 🥲")]

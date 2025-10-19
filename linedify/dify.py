@@ -4,6 +4,7 @@ from logging import getLogger, NullHandler
 from typing import Dict, Tuple
 import aiohttp
 
+from .utils import normalize_line_breaks
 
 logger = getLogger(__name__)
 logger.addHandler(NullHandler())
@@ -32,9 +33,10 @@ class DifyAgent:
         self.conversation_ids = {}
 
     async def make_payloads(self, *, text: str, image_bytes: bytes = None, inputs: dict = None, user: str = None) -> Dict:
+        normalized_text = normalize_line_breaks(text)
         payloads = {
             "inputs": inputs or {},
-            "query": text,
+            "query": normalized_text,
             "response_mode": "streaming" if self.type == DifyType.Agent else "blocking",
             "user": user or self.default_user,
             "auto_generate_name": False,
@@ -87,22 +89,50 @@ class DifyAgent:
             if self.verbose:
                 logger.debug(f"Chunk from Dify: {json.dumps(chunk, ensure_ascii=False)}")
 
-            event_type = chunk["event"]
+            event_type = chunk.get("event")
 
-            if event_type == "agent_message":
-                conversation_id = chunk["conversation_id"]
-                response_text += chunk["answer"]
+            # Text chunk. New spec uses "message", old spec uses "agent_message".
+            if event_type in ("agent_message", "message"):
+                if cid := chunk.get("conversation_id"):
+                    conversation_id = cid
+                response_text += chunk.get("answer", "")
 
+            # Tool call (old spec)
             elif event_type == "agent_thought":
                 if tool := chunk.get("tool"):
                     response_data["tool"] = tool
                 if tool_input := chunk.get("tool_input"):
                     response_data["tool_input"] = tool_input
-    
-            elif event_type == "message_end":
-                if retriever_resources := chunk["metadata"].get("retriever_resources"):
-                    response_data["retriever_resources"] = retriever_resources
 
+            # File event in new spec
+            elif event_type == "message_file":
+                files = response_data.setdefault("message_files", [])
+                files.append({
+                    "id": chunk.get("id"),
+                    "type": chunk.get("type"),
+                    "url": chunk.get("url"),
+                    "belongs_to": chunk.get("belongs_to"),
+                })
+                if cid := chunk.get("conversation_id"):
+                    conversation_id = cid
+
+            # Message content replaced (new spec)
+            elif event_type == "message_replace":
+                response_text = chunk.get("answer", "")
+                if cid := chunk.get("conversation_id"):
+                    conversation_id = cid
+
+            # End of streaming
+            elif event_type == "message_end":
+                metadata = chunk.get("metadata") or {}
+                if retriever_resources := metadata.get("retriever_resources"):
+                    response_data["retriever_resources"] = retriever_resources
+                if cid := chunk.get("conversation_id"):
+                    conversation_id = cid
+
+            # Ignore other event types (tts_message, workflow logs, etc.)
+
+        response_text = normalize_line_breaks(response_text)
         return conversation_id, response_text, response_data
 
     async def process_chatbot_response(self, response: aiohttp.ClientResponse) -> Tuple[str, str, Dict]:
@@ -112,7 +142,7 @@ class DifyAgent:
             logger.info(f"Response from Dify: {json.dumps(response_json, ensure_ascii=False)}")
 
         conversation_id = response_json["conversation_id"]
-        response_text = response_json["answer"]
+        response_text = normalize_line_breaks(response_json["answer"])
         return conversation_id, response_text, {}
 
     async def process_textgenerator_response(self, response: aiohttp.ClientResponse) -> Tuple[str, str, Dict]:

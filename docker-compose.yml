@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  linedify:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-18080}:${PORT:-18080}"
+    restart: unless-stopped

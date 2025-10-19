@@ -19,6 +19,7 @@
 
     - Built on FastAPI for high performance and easy scaling
     - Asynchronous processing for smooth operations
+    - Compatible with Dify API v1.6.0 streaming events
 
 
 ## 📦 Install
@@ -38,6 +39,7 @@ By passing the HTTP request body and signature to `line_dify.process_request`, t
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, BackgroundTasks
 from linedify import LineDify
+import os
 
 # LINE Bot - Dify Agent Integrator
 line_dify = LineDify(
@@ -47,6 +49,13 @@ line_dify = LineDify(
     dify_base_url=DIFY_BASE_URL,    # e.g. http://localhost/v1
     dify_user=DIFY_USER
 )
+
+TARGET_ROOM_ID = os.getenv("TARGET_ROOM_ID")
+
+@line_dify.validate_event
+async def validate_event(event):
+    if TARGET_ROOM_ID and event.source.type == "room" and event.source.room_id != TARGET_ROOM_ID:
+        return []
 
 # FastAPI
 @asynccontextmanager
@@ -73,6 +82,46 @@ uvicorn run:app
 ```
 
 NOTE: You have to expose the host:port to where the LINE API server can access.
+
+## 🔧 Environment Variables
+
+Copy `.env.example` to `.env` and set the following variables:
+
+- `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_CHANNEL_SECRET`
+- `DIFY_API_KEY`
+- `DIFY_BASE_URL`
+- `DIFY_USER`
+- *(optional)* `DIFY_IMAGE_PATH` - path to an image file for tests
+- *(optional)* `PORT` - server port (default `18080`)
+- *(optional)* `TARGET_ROOM_ID` - room ID the bot responds to
+- *(optional)* `LINEDIFY_VERBOSE` - set to `true` to enable verbose logging
+
+## 🐳 Docker
+
+Use the following commands to build and run the container image.
+
+```sh
+docker build -t linedify .
+docker run -p 8443:8443 \
+  -e LINE_CHANNEL_ACCESS_TOKEN=YOUR_CHANNEL_ACCESS_TOKEN \
+  -e LINE_CHANNEL_SECRET=YOUR_CHANNEL_SECRET \
+  -e DIFY_API_KEY=DIFY_API_KEY \
+  -e DIFY_BASE_URL=DIFY_BASE_URL \
+  -e DIFY_USER=DIFY_USER \
+  -e TARGET_ROOM_ID=YOUR_ROOM_ID \
+  -e LINEDIFY_VERBOSE=true \
+  -e PORT=8443 \
+  linedify
+```
+
+The default listening port is `18080`. To change it, override the `PORT` environment variable.
+For example, to listen on port 8443, specify as follows.
+
+```sh
+PORT=8443
+```
+
 
 
 ## 🕹️ Switching Types
@@ -235,7 +284,7 @@ line_dify = LineDify(
 
 ## 🐝 Debug
 
-Set `verbose=True` to see the request and response, both from/to LINE and from/to Dify.
+Set `verbose=True` or environment variable `LINEDIFY_VERBOSE=true` to see the request and response, both from/to LINE and from/to Dify.
 
 ```python
 line_dify = LineDify(

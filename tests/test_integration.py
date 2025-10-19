@@ -199,3 +199,19 @@ async def test_to_error_message(line_dify):
 
     reply_messages = await line_dify.process_event(to_message_event("hello"))
     assert reply_messages[0].text == "Custom error message"
+
+
+@pytest.mark.asyncio
+async def test_preserve_line_breaks(line_dify):
+    captured = {}
+
+    async def fake_invoke(*, conversation_id, text=None, image=None, inputs=None, user=None, start_as_new=False):
+        captured["text"] = text
+        return ("cid123", "first line\r\nsecond line", {})
+
+    line_dify.dify_agent.invoke = fake_invoke
+
+    reply_messages = await line_dify.process_event(to_message_event("first line\r\nsecond line"))
+
+    assert captured["text"] == "first line\nsecond line"
+    assert reply_messages[0].text == "first line\nsecond line"
