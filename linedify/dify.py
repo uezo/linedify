@@ -89,7 +89,7 @@ class DifyAgent:
 
             event_type = chunk["event"]
 
-            if event_type == "agent_message":
+            if event_type == "agent_message" or event_type == "message":
                 conversation_id = chunk["conversation_id"]
                 response_text += chunk["answer"]
 
@@ -100,7 +100,7 @@ class DifyAgent:
                     response_data["tool_input"] = tool_input
     
             elif event_type == "message_end":
-                if retriever_resources := chunk["metadata"].get("retriever_resources"):
+                if retriever_resources := chunk.get("metadata", {}).get("retriever_resources"):
                     response_data["retriever_resources"] = retriever_resources
 
         return conversation_id, response_text, response_data
